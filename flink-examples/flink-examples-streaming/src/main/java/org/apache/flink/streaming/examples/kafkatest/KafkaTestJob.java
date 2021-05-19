@@ -1,4 +1,4 @@
-package org.apache.flink.streaming.examples.wordcount;
+package org.apache.flink.streaming.examples.kafkatest;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.typeinfo.TypeHint;
