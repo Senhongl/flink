@@ -1,4 +1,5 @@
-package org.apache.flink.streaming.examples.wordcount;
+package org.apache.flink.streaming.examples.kafkatest;
+
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.typeinfo.TypeHint;
@@ -8,9 +9,7 @@ import org.apache.flink.api.java.utils.ParameterTool;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
-import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
-import org.apache.flink.streaming.api.environment.CheckpointConfig;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.connectors.kafka.FlinkKafkaConsumer;
 import org.apache.flink.streaming.connectors.kafka.FlinkKafkaProducer;
@@ -88,21 +87,7 @@ public class KafkaTestJob {
 
         source.addSink(kafkaSinkFunction).name("Kafka SinkFunction");
 
-        // start a checkpoint every 1000 ms
-        env.enableCheckpointing(1000);
-        env.getCheckpointConfig().setCheckpointingMode(CheckpointingMode.EXACTLY_ONCE);
-
-        env.getCheckpointConfig().setMinPauseBetweenCheckpoints(500);
-
-        env.getCheckpointConfig().setCheckpointTimeout(60000);
-
-        env.getCheckpointConfig().setMaxConcurrentCheckpoints(1);
-
-        env.getCheckpointConfig().enableExternalizedCheckpoints(
-                CheckpointConfig.ExternalizedCheckpointCleanup.RETAIN_ON_CANCELLATION);
-
-        env.getCheckpointConfig().enableUnalignedCheckpoints();
-
+        env.enableCheckpointing(10 * 1000);
         env.execute("Kafka DataStream E2E Test on VVP");
     }
 

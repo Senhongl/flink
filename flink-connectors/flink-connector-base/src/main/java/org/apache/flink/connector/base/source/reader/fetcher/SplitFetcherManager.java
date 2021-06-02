@@ -117,6 +117,8 @@ public abstract class SplitFetcherManager<E, SplitT extends SourceSplit> {
 
     public abstract void addSplits(List<SplitT> splitsToAdd);
 
+    public abstract void removeSplits(List<SplitT> splitsToRemove);
+
     protected void startFetcher(SplitFetcher<E, SplitT> fetcher) {
         executors.submit(fetcher);
     }

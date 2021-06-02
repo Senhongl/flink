@@ -171,6 +171,17 @@ public class SplitFetcher<E, SplitT extends SourceSplit> implements Runnable {
         wakeUp(true);
     }
 
+    /**
+     * Remove splits from the split fetcher. This operation is asynchronous.
+     * TODO: COULD IT BE ASYNCHRONOUS?
+     *
+     * @param splitsToRemove the splits to remove.
+     */
+    public void removeSplits(List<SplitT> splitsToRemove) {
+        enqueueTask(new RemoveSplitsTask<>(splitReader, splitsToRemove, assignedSplits));
+        wakeUp(true);
+    }
+
     public void enqueueTask(SplitFetcherTask task) {
         synchronized (lock) {
             taskQueue.offer(task);
