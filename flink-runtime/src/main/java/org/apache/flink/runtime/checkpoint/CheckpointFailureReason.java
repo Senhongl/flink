@@ -64,6 +64,14 @@ public enum CheckpointFailureReason {
     CHECKPOINT_DECLINED_INPUT_END_OF_STREAM(
             false, "Checkpoint was declined because one input stream is finished"),
 
+    CHECKPOINT_DECLINED_SNAPSHOT_UNAVAILABLE_AND_ACCEPTABLE(
+            false, "Checkpoint was rejected because one operator is not allowed to do so."
+                                    + "And it is acceptable."),
+
+    CHECKPOINT_DECLINED_SNAPSHOT_UNAVAILABLE_AND_UNACCEPTABLE(
+            false, "Checkpoint was rejected because one operator is not allowed to do so."
+                                    + "And it is unacceptable."),
+
     CHECKPOINT_COORDINATOR_SHUTDOWN(false, "CheckpointCoordinator shutdown."),
 
     CHECKPOINT_COORDINATOR_SUSPEND(false, "Checkpoint Coordinator is suspending."),

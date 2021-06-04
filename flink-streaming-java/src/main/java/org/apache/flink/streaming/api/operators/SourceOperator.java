@@ -32,6 +32,9 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.io.InputStatus;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
 import org.apache.flink.metrics.MetricGroup;
+import org.apache.flink.util.CheckpointAvailabilityProvider;
+import org.apache.flink.runtime.checkpoint.CheckpointFailureReason;
+import org.apache.flink.runtime.checkpoint.CheckpointMetaData;
 import org.apache.flink.runtime.operators.coordination.OperatorEvent;
 import org.apache.flink.runtime.operators.coordination.OperatorEventGateway;
 import org.apache.flink.runtime.operators.coordination.OperatorEventHandler;
@@ -48,6 +51,7 @@ import org.apache.flink.streaming.runtime.io.PushingAsyncDataInput;
 import org.apache.flink.streaming.runtime.tasks.ProcessingTimeService;
 import org.apache.flink.util.CollectionUtil;
 import org.apache.flink.util.FlinkRuntimeException;
+import org.apache.flink.util.UnavailableOption;
 import org.apache.flink.util.UserCodeClassLoader;
 import org.apache.flink.util.function.FunctionWithException;
 
@@ -70,7 +74,7 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
  */
 @Internal
 public class SourceOperator<OUT, SplitT extends SourceSplit> extends AbstractStreamOperator<OUT>
-        implements OperatorEventHandler, PushingAsyncDataInput<OUT> {
+        implements OperatorEventHandler, PushingAsyncDataInput<OUT>, CheckpointAvailabilityProvider {
     private static final long serialVersionUID = 1405537676017904695L;
 
     // Package private for unit test.
@@ -298,6 +302,12 @@ public class SourceOperator<OUT, SplitT extends SourceSplit> extends AbstractStr
         currentMainOutput = eventTimeLogic.createMainOutput(output);
         lastInvokedOutput = output;
         return sourceReader.pollNext(currentMainOutput);
+    }
+
+    @Override
+    public UnavailableOption isSnapshotAvailable(long checkpointID) {
+        LOG.debug("Checking availability of taking the snapshot of {} for SourceOperator.", checkpointID);
+        return sourceReader.isSnapshotAvailable(checkpointID);
     }
 
     @Override

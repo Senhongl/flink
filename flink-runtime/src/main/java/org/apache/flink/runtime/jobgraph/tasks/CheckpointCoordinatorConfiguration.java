@@ -26,6 +26,7 @@ import org.apache.flink.util.Preconditions;
 import java.io.Serializable;
 import java.util.Objects;
 
+//TODO: The list of parameters is changed, changed those who try to initialize this class as well.
 /**
  * Configuration settings for the {@link CheckpointCoordinator}. This includes the checkpoint
  * interval, the checkpoint timeout, the pause between checkpoints, the maximum number of concurrent
@@ -46,6 +47,8 @@ public class CheckpointCoordinatorConfiguration implements Serializable {
     private final int maxConcurrentCheckpoints;
 
     private final int tolerableCheckpointFailureNumber;
+
+    private final long tolerableCheckpointFailureTimeout;
 
     /** Settings for what to do with checkpoints when a job finishes. */
     private final CheckpointRetentionPolicy checkpointRetentionPolicy;
@@ -76,7 +79,8 @@ public class CheckpointCoordinatorConfiguration implements Serializable {
             boolean isExactlyOnce,
             boolean isUnalignedCheckpoint,
             boolean isPreferCheckpointForRecovery,
-            int tolerableCpFailureNumber) {
+            int tolerableCpFailureNumber,
+            long tolerableCpFailureTimeout) {
         this(
                 checkpointInterval,
                 checkpointTimeout,
@@ -86,6 +90,7 @@ public class CheckpointCoordinatorConfiguration implements Serializable {
                 isExactlyOnce,
                 isPreferCheckpointForRecovery,
                 tolerableCpFailureNumber,
+                tolerableCpFailureTimeout,
                 isUnalignedCheckpoint,
                 0);
     }
@@ -99,6 +104,7 @@ public class CheckpointCoordinatorConfiguration implements Serializable {
             boolean isExactlyOnce,
             boolean isPreferCheckpointForRecovery,
             int tolerableCpFailureNumber,
+            long tolerableCpFailureTimeout,
             boolean isUnalignedCheckpointsEnabled,
             long alignmentTimeout) {
 
@@ -107,7 +113,8 @@ public class CheckpointCoordinatorConfiguration implements Serializable {
                 || checkpointTimeout < MINIMAL_CHECKPOINT_TIME
                 || minPauseBetweenCheckpoints < 0
                 || maxConcurrentCheckpoints < 1
-                || tolerableCpFailureNumber < 0) {
+                || tolerableCpFailureNumber < 0
+                || tolerableCpFailureTimeout < checkpointTimeout) {
             throw new IllegalArgumentException();
         }
         Preconditions.checkArgument(
@@ -122,6 +129,7 @@ public class CheckpointCoordinatorConfiguration implements Serializable {
         this.isExactlyOnce = isExactlyOnce;
         this.isPreferCheckpointForRecovery = isPreferCheckpointForRecovery;
         this.tolerableCheckpointFailureNumber = tolerableCpFailureNumber;
+        this.tolerableCheckpointFailureTimeout = tolerableCpFailureTimeout;
         this.isUnalignedCheckpointsEnabled = isUnalignedCheckpointsEnabled;
         this.alignmentTimeout = alignmentTimeout;
     }
@@ -156,6 +164,10 @@ public class CheckpointCoordinatorConfiguration implements Serializable {
 
     public int getTolerableCheckpointFailureNumber() {
         return tolerableCheckpointFailureNumber;
+    }
+
+    public long getTolerableCheckpointFailureTimeout() {
+        return tolerableCheckpointFailureTimeout;
     }
 
     public boolean isUnalignedCheckpointsEnabled() {
@@ -239,6 +251,7 @@ public class CheckpointCoordinatorConfiguration implements Serializable {
         private boolean isExactlyOnce = true;
         private boolean isPreferCheckpointForRecovery = true;
         private int tolerableCheckpointFailureNumber;
+        private long tolerableCheckpointFailureTimeout;
         private boolean isUnalignedCheckpointsEnabled;
         private long alignmentTimeout = 0;
 
@@ -252,6 +265,7 @@ public class CheckpointCoordinatorConfiguration implements Serializable {
                     isExactlyOnce,
                     isPreferCheckpointForRecovery,
                     tolerableCheckpointFailureNumber,
+                    tolerableCheckpointFailureTimeout,
                     isUnalignedCheckpointsEnabled,
                     alignmentTimeout);
         }
@@ -300,6 +314,12 @@ public class CheckpointCoordinatorConfiguration implements Serializable {
         public CheckpointCoordinatorConfigurationBuilder setTolerableCheckpointFailureNumber(
                 int tolerableCheckpointFailureNumber) {
             this.tolerableCheckpointFailureNumber = tolerableCheckpointFailureNumber;
+            return this;
+        }
+
+        public CheckpointCoordinatorConfigurationBuilder setTolerableCheckpointFailureNumber(
+                long tolerableCheckpointFailureTimeout) {
+            this.tolerableCheckpointFailureTimeout = tolerableCheckpointFailureTimeout;
             return this;
         }
 

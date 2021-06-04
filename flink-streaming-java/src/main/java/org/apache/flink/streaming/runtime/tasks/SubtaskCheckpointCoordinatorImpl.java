@@ -38,9 +38,11 @@ import org.apache.flink.runtime.state.CheckpointStreamFactory;
 import org.apache.flink.runtime.state.SnapshotResult;
 import org.apache.flink.streaming.api.operators.OperatorSnapshotFutures;
 import org.apache.flink.streaming.api.operators.StreamOperator;
+import org.apache.flink.util.CheckpointAvailabilityProvider;
 import org.apache.flink.util.ExceptionUtils;
 import org.apache.flink.util.FlinkRuntimeException;
 import org.apache.flink.util.IOUtils;
+import org.apache.flink.util.UnavailableOption;
 import org.apache.flink.util.function.BiFunctionWithException;
 
 import org.slf4j.Logger;
@@ -280,6 +282,42 @@ class SubtaskCheckpointCoordinatorImpl implements SubtaskCheckpointCoordinator {
             return;
         }
 
+        // Step (1): If any operator of the subtask has been closed, decline the checkpoint.
+        // Since the checkpoint is executing in the mailbox thread and the operator has to be closed
+        // by the mailbox thread, we only need to check it once at the very beginning.
+        if (taskIsClosed(metadata, operatorChain)) return;
+
+        // Step (2): A preliminary check for operator to see if it is able to take a snapshot.
+        UnavailableOption option = checkSnapshotAvailability(metadata, operatorChain);
+        if (option == UnavailableOption.SNAPSHOT_UNAVAILABLE_SOFT_FAILURE) {
+            LOG.info(
+                    "Checkpoint {} has been rejected by task {} with soft failure.",
+                    metadata.getCheckpointId(),
+                    taskName
+            );
+
+            env.declineCheckpoint(
+                    metadata.getCheckpointId(),
+                    new CheckpointException(
+                            "Task Name" + taskName,
+                            CheckpointFailureReason.CHECKPOINT_DECLINED_SNAPSHOT_UNAVAILABLE_AND_ACCEPTABLE));
+            return;
+        } else if (option == UnavailableOption.SNAPSHOT_UNAVAILABLE_HARD_FAILURE) {
+            LOG.info(
+                    "Checkpoint {} has been rejected by task {} with hard failure.",
+                    metadata.getCheckpointId(),
+                    taskName
+            );
+
+            env.declineCheckpoint(
+                    metadata.getCheckpointId(),
+                    new CheckpointException(
+                            "Task Name" + taskName,
+                            CheckpointFailureReason.CHECKPOINT_DECLINED_SNAPSHOT_UNAVAILABLE_AND_UNACCEPTABLE));
+            return;
+        }
+
+
         // if checkpoint has been previously unaligned, but was forced to be aligned (pointwise
         // connection), revert it here so that it can jump over output data
         if (options.getAlignment() == CheckpointOptions.AlignmentType.FORCED_ALIGNED) {
@@ -287,22 +325,22 @@ class SubtaskCheckpointCoordinatorImpl implements SubtaskCheckpointCoordinator {
             initInputsCheckpoint(metadata.getCheckpointId(), options);
         }
 
-        // Step (1): Prepare the checkpoint, allow operators to do some pre-barrier work.
+        // Step (3): Prepare the checkpoint, allow operators to do some pre-barrier work.
         //           The pre-barrier work should be nothing or minimal in the common case.
         operatorChain.prepareSnapshotPreBarrier(metadata.getCheckpointId());
 
-        // Step (2): Send the checkpoint barrier downstream
+        // Step (4): Send the checkpoint barrier downstream
         operatorChain.broadcastEvent(
                 new CheckpointBarrier(metadata.getCheckpointId(), metadata.getTimestamp(), options),
                 options.isUnalignedCheckpoint());
 
-        // Step (3): Prepare to spill the in-flight buffers for input and output
+        // Step (5): Prepare to spill the in-flight buffers for input and output
         if (options.isUnalignedCheckpoint()) {
             // output data already written while broadcasting event
             channelStateWriter.finishOutput(metadata.getCheckpointId());
         }
 
-        // Step (4): Take the state snapshot. This should be largely asynchronous, to not impact
+        // Step (6): Take the state snapshot. This should be largely asynchronous, to not impact
         // progress of the
         // streaming topology
 
@@ -548,15 +586,9 @@ class SubtaskCheckpointCoordinatorImpl implements SubtaskCheckpointCoordinator {
                 unregisterAsyncCheckpointRunnable(asyncCheckpointRunnable.getCheckpointId());
     }
 
-    private boolean takeSnapshotSync(
-            Map<OperatorID, OperatorSnapshotFutures> operatorSnapshotsInProgress,
+    private boolean taskIsClosed(
             CheckpointMetaData checkpointMetaData,
-            CheckpointMetricsBuilder checkpointMetrics,
-            CheckpointOptions checkpointOptions,
-            OperatorChain<?, ?> operatorChain,
-            Supplier<Boolean> isRunning)
-            throws Exception {
-
+            OperatorChain<?, ?> operatorChain) {
         for (final StreamOperatorWrapper<?, ?> operatorWrapper :
                 operatorChain.getAllOperators(true)) {
             if (operatorWrapper.isClosed()) {
@@ -565,9 +597,44 @@ class SubtaskCheckpointCoordinatorImpl implements SubtaskCheckpointCoordinator {
                         new CheckpointException(
                                 "Task Name" + taskName,
                                 CheckpointFailureReason.CHECKPOINT_DECLINED_TASK_CLOSING));
-                return false;
+                return true;
             }
         }
+        return false;
+    }
+
+    private UnavailableOption checkSnapshotAvailability(
+            CheckpointMetaData checkpointMetaData,
+            OperatorChain<?, ?> operatorChain) {
+
+        long checkpointID = checkpointMetaData.getCheckpointId();
+        for (final StreamOperatorWrapper<?, ?> operatorWrapper :
+                operatorChain.getAllOperators()) {
+            if (operatorWrapper.getStreamOperator() instanceof CheckpointAvailabilityProvider) {
+                UnavailableOption option = ((CheckpointAvailabilityProvider) operatorWrapper
+                                                                                .getStreamOperator())
+                                                                                .isSnapshotAvailable(checkpointID);
+
+                if (option != UnavailableOption.SNAPSHOT_AVAILABLE) {
+                    LOG.debug("Checkpoint {} is rejected by operator {}",
+                                    checkpointID,
+                                    operatorWrapper.getStreamOperator().getOperatorID());
+                    return option;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private boolean takeSnapshotSync(
+            Map<OperatorID, OperatorSnapshotFutures> operatorSnapshotsInProgress,
+            CheckpointMetaData checkpointMetaData,
+            CheckpointMetricsBuilder checkpointMetrics,
+            CheckpointOptions checkpointOptions,
+            OperatorChain<?, ?> operatorChain,
+            Supplier<Boolean> isRunning)
+            throws Exception {
 
         long checkpointId = checkpointMetaData.getCheckpointId();
         long started = System.nanoTime();

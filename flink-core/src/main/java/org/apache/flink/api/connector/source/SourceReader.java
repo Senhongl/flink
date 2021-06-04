@@ -21,6 +21,8 @@ package org.apache.flink.api.connector.source;
 import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.api.common.state.CheckpointListener;
 import org.apache.flink.core.io.InputStatus;
+import org.apache.flink.util.CheckpointAvailabilityProvider;
+import org.apache.flink.util.UnavailableOption;
 
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -34,7 +36,7 @@ import java.util.concurrent.CompletableFuture;
  */
 @PublicEvolving
 public interface SourceReader<T, SplitT extends SourceSplit>
-        extends AutoCloseable, CheckpointListener {
+        extends AutoCloseable, CheckpointListener, CheckpointAvailabilityProvider {
 
     /** Start the reader. */
     void start();
@@ -110,6 +112,13 @@ public interface SourceReader<T, SplitT extends SourceSplit>
      * @param sourceEvent the event sent by the {@link SplitEnumerator}.
      */
     default void handleSourceEvents(SourceEvent sourceEvent) {}
+
+    /**
+     * <p>This method has a default implementation of returning SNAPSHOT_AVAILABLE, which means that
+     * the default behavior is allowing to take a snapshot under any scenario.
+     */
+    @Override
+    default UnavailableOption isSnapshotAvailable(long checkpointID) {return UnavailableOption.SNAPSHOT_AVAILABLE;}
 
     /**
      * We have an empty default implementation here because most source readers do not have to

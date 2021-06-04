@@ -152,6 +152,9 @@ public class CheckpointCoordinator {
     /** The max time (in ms) that a checkpoint may take. */
     private final long checkpointTimeout;
 
+    /** The max time (in ms) that the job can tolerance for continuous checkpoint failures. */
+    private final long tolerableCheckpointFailuresTimeout;
+
     /**
      * The min time(in ms) to delay after a checkpoint could be triggered. Allows to enforce minimum
      * processing time between checkpoint attempts
@@ -180,6 +183,10 @@ public class CheckpointCoordinator {
     /** A handle to the current periodic trigger, to cancel it when necessary. */
     private ScheduledFuture<?> currentPeriodicTrigger;
 
+    /** A handle to the current timer for continuous checkpoint failures timeout, to cancel and restart
+     * it when a checkpoint succeeds
+     */
+    private ScheduledFuture<?> currentCheckpointFailuresTimeoutTimer;
     /**
      * The timestamp (via {@link Clock#relativeTimeMillis()}) when the last checkpoint completed.
      */
@@ -308,6 +315,7 @@ public class CheckpointCoordinator {
         this.isExactlyOnceMode = chkConfig.isExactlyOnce();
         this.unalignedCheckpointsEnabled = chkConfig.isUnalignedCheckpointsEnabled();
         this.alignmentTimeout = chkConfig.getAlignmentTimeout();
+        this.tolerableCheckpointFailuresTimeout = chkConfig.getTolerableCheckpointFailureTimeout();
 
         this.recentPendingCheckpoints = new ArrayDeque<>(NUM_GHOST_CHECKPOINT_IDS);
         this.masterHooks = new HashMap<>();
@@ -1183,7 +1191,8 @@ public class CheckpointCoordinator {
                                 this::scheduleTriggerRequest,
                                 executor,
                                 getStatsCallback(pendingCheckpoint));
-
+                // reset the timer for continuous checkpoint failure timeout
+                startCheckpointFailuresTimeoutTimer();
                 failureManager.handleCheckpointSuccess(pendingCheckpoint.getCheckpointId());
             } catch (Exception e1) {
                 // abort the current pending checkpoint if we fails to finalize the pending
@@ -1717,6 +1726,34 @@ public class CheckpointCoordinator {
      */
     public boolean isPeriodicCheckpointingConfigured() {
         return baseInterval != Long.MAX_VALUE;
+    }
+
+    // --------------------------------------------------------------------------------------------
+    //  Timer for continuous checkpoint failures timeout
+    // --------------------------------------------------------------------------------------------
+    //TODO: Call the startCheckpointFailuresTimeoutTimer where the startCheckpointScheduler is called.
+    //TODO: Reset it when the checkpoint completes.
+    public void startCheckpointFailuresTimeoutTimer() {
+        synchronized (lock) { // TODO: NECESSARY?
+            if (shutdown) {
+                throw new IllegalArgumentException("Checkpoint coordinator is shut down");
+            }
+
+            cancelCheckpointFailuresTimeoutTimer();
+            currentCheckpointFailuresTimeoutTimer = timer.schedule(
+                    failureManager.new HandleJobFailsDueToCheckpointFailuresTimeout(),
+                    tolerableCheckpointFailuresTimeout,
+                    TimeUnit.MILLISECONDS);
+        }
+    }
+
+    public void cancelCheckpointFailuresTimeoutTimer() {
+        synchronized (lock) {
+            if (currentCheckpointFailuresTimeoutTimer != null) {
+                currentCheckpointFailuresTimeoutTimer.cancel(false);
+                currentCheckpointFailuresTimeoutTimer = null;
+            }
+        }
     }
 
     // --------------------------------------------------------------------------------------------

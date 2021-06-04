@@ -173,7 +173,7 @@ public class SplitFetcher<E, SplitT extends SourceSplit> implements Runnable {
 
     /**
      * Remove splits from the split fetcher. This operation is asynchronous.
-     * TODO: COULD IT BE ASYNCHRONOUS?
+     * TODO: COULD IT BE ASYNCHRONOUS? Since the JobMaster might need to wait for a long time about the completion of removal to keep doing checkpoint.
      *
      * @param splitsToRemove the splits to remove.
      */

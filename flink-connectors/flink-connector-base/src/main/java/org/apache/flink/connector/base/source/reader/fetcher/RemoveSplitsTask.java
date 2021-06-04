@@ -26,6 +26,11 @@ public class RemoveSplitsTask<SplitT extends SourceSplit> implements SplitFetche
 
     @Override
     public boolean run() {
+        /**
+         * TODO: What if the splits now are finished reading?
+         *
+         */
+
         for (SplitT s : splitsToRemove) {
             assignedSplits.remove(s.splitId(), s);
         }
