@@ -1,5 +1,8 @@
 package org.apache.flink.streaming.examples.kafkatest;
+<<<<<<< HEAD:flink-examples/flink-examples-streaming/src/main/java/org/apache/flink/streaming/examples/kafkatest/KafkaTestJob.java
 
+=======
+>>>>>>> a44f5415aa12e49bad94688d4a56292d1b280fa0:flink-examples/flink-examples-streaming/src/main/java/org/apache/flink/streaming/examples/wordcount/KafkaTestJob.java
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.typeinfo.TypeHint;
