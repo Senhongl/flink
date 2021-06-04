@@ -213,4 +213,12 @@ public class ExecutionCheckpointingOptions {
                                                     + "the specific checkpoint without in-flight data.")
                                     .linebreak()
                                     .build());
+
+    public static final ConfigOption<Long> TOLERABLE_FAILURE_TIMEOUT =
+            ConfigOptions.key("execution.checkpointing.tolerable-failed-checkpoints-timeout")
+                    .longType()
+                    .defaultValue(Long.MAX_VALUE)
+                    .withDescription(
+                            "The tolerable continuous checkpoint failures timeout. Default value is the max"
+                                    + "value of long, which means that no timeout setting for the failures.");
 }

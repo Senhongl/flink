@@ -1311,6 +1311,8 @@ public class StreamingJobGraphGenerator {
                                 .setPreferCheckpointForRecovery(cfg.isPreferCheckpointForRecovery())
                                 .setTolerableCheckpointFailureNumber(
                                         cfg.getTolerableCheckpointFailureNumber())
+                                .setTolerableCheckpointFailureTimeout(
+                                        cfg.getTolerableCheckpointFailureTimeout())
                                 .setUnalignedCheckpointsEnabled(cfg.isUnalignedCheckpointsEnabled())
                                 .setCheckpointIdOfIgnoredInFlightData(
                                         cfg.getCheckpointIdOfIgnoredInFlightData())

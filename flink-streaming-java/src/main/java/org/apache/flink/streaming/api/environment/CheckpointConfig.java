@@ -40,6 +40,7 @@ import java.time.Duration;
 
 import static java.util.Objects.requireNonNull;
 import static org.apache.flink.runtime.checkpoint.CheckpointFailureManager.UNLIMITED_TOLERABLE_FAILURE_NUMBER;
+import static org.apache.flink.runtime.checkpoint.CheckpointFailureManager.UNLIMITED_TOLERABLE_FAILURE_TIMEOUT;
 import static org.apache.flink.runtime.jobgraph.tasks.CheckpointCoordinatorConfiguration.MINIMAL_CHECKPOINT_TIME;
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
@@ -128,6 +129,12 @@ public class CheckpointConfig implements java.io.Serializable {
     private int tolerableCheckpointFailureNumber = UNDEFINED_TOLERABLE_CHECKPOINT_NUMBER;
 
     /**
+     * The tolerable time range of checkpoint failures. If no checkpoint succeeds within this time
+     * range, the job would failover. The default value is the max value of long.
+     */
+    private long tolerableCheckpointFailureTimeout = UNLIMITED_TOLERABLE_FAILURE_TIMEOUT;
+
+    /**
      * The checkpoint storage for this application. This field is marked as transient because it may
      * contain user-code.
      */
@@ -148,6 +155,7 @@ public class CheckpointConfig implements java.io.Serializable {
         this.minPauseBetweenCheckpoints = checkpointConfig.minPauseBetweenCheckpoints;
         this.preferCheckpointForRecovery = checkpointConfig.preferCheckpointForRecovery;
         this.tolerableCheckpointFailureNumber = checkpointConfig.tolerableCheckpointFailureNumber;
+        this.tolerableCheckpointFailureTimeout = checkpointConfig.tolerableCheckpointFailureTimeout;
         this.unalignedCheckpointsEnabled = checkpointConfig.isUnalignedCheckpointsEnabled();
         this.alignmentTimeout = checkpointConfig.alignmentTimeout;
         this.approximateLocalRecovery = checkpointConfig.isApproximateLocalRecoveryEnabled();
@@ -246,6 +254,14 @@ public class CheckpointConfig implements java.io.Serializable {
                     String.format(
                             "Checkpoint timeout must be larger than or equal to %s ms",
                             MINIMAL_CHECKPOINT_TIME));
+        }
+
+        if (checkpointTimeout > tolerableCheckpointFailureTimeout) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Checkpoint timeout must be smaller than or equal to the tolerable"
+                                    + "checkpoint failures timeout, which is %d ms",
+                            tolerableCheckpointFailureTimeout));
         }
         this.checkpointTimeout = checkpointTimeout;
     }
@@ -426,6 +442,29 @@ public class CheckpointConfig implements java.io.Serializable {
                     "The tolerable failure checkpoint number must be non-negative.");
         }
         this.tolerableCheckpointFailureNumber = tolerableCheckpointFailureNumber;
+    }
+
+    /**
+     * Set the tolerable time range of continuous checkpoint failures. This value should be at least
+     * as large as the checkpoint timeout.
+     */
+    @PublicEvolving
+    public void setTolerableCheckpointFailuresTimeout(long tolerableCheckpointFailuresTimeout) {
+        if (tolerableCheckpointFailuresTimeout < checkpointTimeout) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "The tolerable continuous checkpoint failures timeout must be "
+                                    + "larger than or equal to the checkpoint expiration, "
+                                    + "which is %d ms.",
+                            checkpointTimeout));
+        }
+        this.tolerableCheckpointFailureTimeout = tolerableCheckpointFailuresTimeout;
+    }
+
+    /** Get the tolerable time range of continuous checkpoint failures. */
+    @PublicEvolving
+    public long getTolerableCheckpointFailureTimeout() {
+        return tolerableCheckpointFailureTimeout;
     }
 
     /**
@@ -774,6 +813,9 @@ public class CheckpointConfig implements java.io.Serializable {
         configuration
                 .getOptional(ExecutionCheckpointingOptions.TOLERABLE_FAILURE_NUMBER)
                 .ifPresent(this::setTolerableCheckpointFailureNumber);
+        configuration
+                .getOptional(ExecutionCheckpointingOptions.TOLERABLE_FAILURE_TIMEOUT)
+                .ifPresent(this::setTolerableCheckpointFailuresTimeout);
         configuration
                 .getOptional(ExecutionCheckpointingOptions.EXTERNALIZED_CHECKPOINT)
                 .ifPresent(this::enableExternalizedCheckpoints);

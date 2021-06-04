@@ -38,9 +38,11 @@ import org.apache.flink.runtime.state.CheckpointStreamFactory;
 import org.apache.flink.runtime.state.SnapshotResult;
 import org.apache.flink.streaming.api.operators.OperatorSnapshotFutures;
 import org.apache.flink.streaming.api.operators.StreamOperator;
+import org.apache.flink.util.CheckpointAvailabilityProvider;
 import org.apache.flink.util.ExceptionUtils;
 import org.apache.flink.util.FlinkRuntimeException;
 import org.apache.flink.util.IOUtils;
+import org.apache.flink.util.SnapshotAvailability;
 import org.apache.flink.util.function.BiFunctionWithException;
 
 import org.slf4j.Logger;
@@ -302,12 +304,59 @@ class SubtaskCheckpointCoordinatorImpl implements SubtaskCheckpointCoordinator {
             channelStateWriter.finishOutput(metadata.getCheckpointId());
         }
 
-        // Step (4): Take the state snapshot. This should be largely asynchronous, to not impact
+        Map<OperatorID, OperatorSnapshotFutures> snapshotFutures =
+                new HashMap<>(operatorChain.getNumberOfOperators());
+
+        // Step (4): If any operator of the subtask has been closed, decline the checkpoint.
+        if (taskIsClosed(metadata, operatorChain)) {
+            cleanup(snapshotFutures, metadata, metrics, new Exception("Checkpoint declined"));
+            return;
+        }
+
+        // Step (5): A preliminary check for operator to see if it is able to take a snapshot.
+        SnapshotAvailability option = checkSnapshotAvailability(metadata, operatorChain);
+        if (option == SnapshotAvailability.SOFT_FAILURE) {
+            LOG.info(
+                    "Checkpoint {} has been rejected by task {} with soft failure.",
+                    metadata.getCheckpointId(),
+                    taskName);
+
+            env.declineCheckpoint(
+                    metadata.getCheckpointId(),
+                    new CheckpointException(
+                            "Task Name" + taskName,
+                            CheckpointFailureReason
+                                    .CHECKPOINT_DECLINED_SNAPSHOT_UNAVAILABLE_AND_ACCEPTABLE));
+            cleanup(
+                    snapshotFutures,
+                    metadata,
+                    metrics,
+                    new Exception("Checkpoint is rejected and soft failure returns."));
+            return;
+        } else if (option == SnapshotAvailability.HARD_FAILURE) {
+            LOG.info(
+                    "Checkpoint {} has been rejected by task {} with hard failure.",
+                    metadata.getCheckpointId(),
+                    taskName);
+
+            env.declineCheckpoint(
+                    metadata.getCheckpointId(),
+                    new CheckpointException(
+                            "Task Name" + taskName,
+                            CheckpointFailureReason
+                                    .CHECKPOINT_DECLINED_SNAPSHOT_UNAVAILABLE_AND_UNACCEPTABLE));
+            cleanup(
+                    snapshotFutures,
+                    metadata,
+                    metrics,
+                    new Exception("Checkpoint is rejected and hard failure returns."));
+            return;
+        }
+
+        // Step (6): Take the state snapshot. This should be largely asynchronous, to not impact
         // progress of the
         // streaming topology
 
-        Map<OperatorID, OperatorSnapshotFutures> snapshotFutures =
-                new HashMap<>(operatorChain.getNumberOfOperators());
         try {
             if (takeSnapshotSync(
                     snapshotFutures, metadata, metrics, options, operatorChain, isRunning)) {
@@ -548,15 +597,8 @@ class SubtaskCheckpointCoordinatorImpl implements SubtaskCheckpointCoordinator {
                 unregisterAsyncCheckpointRunnable(asyncCheckpointRunnable.getCheckpointId());
     }
 
-    private boolean takeSnapshotSync(
-            Map<OperatorID, OperatorSnapshotFutures> operatorSnapshotsInProgress,
-            CheckpointMetaData checkpointMetaData,
-            CheckpointMetricsBuilder checkpointMetrics,
-            CheckpointOptions checkpointOptions,
-            OperatorChain<?, ?> operatorChain,
-            Supplier<Boolean> isRunning)
-            throws Exception {
-
+    private boolean taskIsClosed(
+            CheckpointMetaData checkpointMetaData, OperatorChain<?, ?> operatorChain) {
         for (final StreamOperatorWrapper<?, ?> operatorWrapper :
                 operatorChain.getAllOperators(true)) {
             if (operatorWrapper.isClosed()) {
@@ -565,9 +607,43 @@ class SubtaskCheckpointCoordinatorImpl implements SubtaskCheckpointCoordinator {
                         new CheckpointException(
                                 "Task Name" + taskName,
                                 CheckpointFailureReason.CHECKPOINT_DECLINED_TASK_CLOSING));
-                return false;
+                return true;
             }
         }
+        return false;
+    }
+
+    private SnapshotAvailability checkSnapshotAvailability(
+            CheckpointMetaData checkpointMetaData, OperatorChain<?, ?> operatorChain) {
+
+        long checkpointID = checkpointMetaData.getCheckpointId();
+        for (final StreamOperatorWrapper<?, ?> operatorWrapper : operatorChain.getAllOperators()) {
+            if (operatorWrapper.getStreamOperator() instanceof CheckpointAvailabilityProvider) {
+                SnapshotAvailability option =
+                        ((CheckpointAvailabilityProvider) operatorWrapper.getStreamOperator())
+                                .isSnapshotAvailable(checkpointID);
+
+                if (option != SnapshotAvailability.AVAILABLE) {
+                    LOG.debug(
+                            "Checkpoint {} is rejected by operator {}",
+                            checkpointID,
+                            operatorWrapper.getStreamOperator().getOperatorID());
+                    return option;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private boolean takeSnapshotSync(
+            Map<OperatorID, OperatorSnapshotFutures> operatorSnapshotsInProgress,
+            CheckpointMetaData checkpointMetaData,
+            CheckpointMetricsBuilder checkpointMetrics,
+            CheckpointOptions checkpointOptions,
+            OperatorChain<?, ?> operatorChain,
+            Supplier<Boolean> isRunning)
+            throws Exception {
 
         long checkpointId = checkpointMetaData.getCheckpointId();
         long started = System.nanoTime();

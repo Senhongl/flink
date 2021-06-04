@@ -61,6 +61,7 @@ public class CheckpointStatsTrackerTest {
                                 false,
                                 false,
                                 0,
+                                Long.MAX_VALUE,
                                 0),
                         null);
 

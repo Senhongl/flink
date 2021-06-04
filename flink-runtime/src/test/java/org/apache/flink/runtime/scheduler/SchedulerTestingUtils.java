@@ -163,6 +163,7 @@ public class SchedulerTestingUtils {
                         false,
                         false,
                         0,
+                        Long.MAX_VALUE,
                         0);
 
         SerializedValue<StateBackend> serializedStateBackend = null;

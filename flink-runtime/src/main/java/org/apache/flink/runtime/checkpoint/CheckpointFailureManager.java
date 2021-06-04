@@ -33,9 +33,12 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
 public class CheckpointFailureManager {
 
     public static final int UNLIMITED_TOLERABLE_FAILURE_NUMBER = Integer.MAX_VALUE;
+    public static final long UNLIMITED_TOLERABLE_FAILURE_TIMEOUT = Long.MAX_VALUE;
+
     public static final String EXCEEDED_CHECKPOINT_TOLERABLE_FAILURE_MESSAGE =
             "Exceeded checkpoint tolerable failure threshold.";
-
+    public static final String TOLERABLE_CHECKPOINT_FAILURES_TIMEOUT_MESSAGE =
+            "Timeout of tolerable continuous checkpoint failures.";
     private final int tolerableCpFailureNumber;
     private final FailJobCallback failureCallback;
     private final AtomicInteger continuousFailureCounter;
@@ -126,6 +129,7 @@ public class CheckpointFailureManager {
             case CHECKPOINT_DECLINED_ON_CANCELLATION_BARRIER:
             case CHECKPOINT_DECLINED_SUBSUMED:
             case CHECKPOINT_DECLINED_INPUT_END_OF_STREAM:
+            case CHECKPOINT_DECLINED_SNAPSHOT_UNAVAILABLE_AND_ACCEPTABLE:
 
             case EXCEPTION:
             case TASK_FAILURE:
@@ -136,6 +140,7 @@ public class CheckpointFailureManager {
                 // ignore
                 break;
 
+            case CHECKPOINT_DECLINED_SNAPSHOT_UNAVAILABLE_AND_UNACCEPTABLE:
             case CHECKPOINT_ASYNC_EXCEPTION:
             case CHECKPOINT_DECLINED:
             case CHECKPOINT_EXPIRED:
@@ -163,6 +168,13 @@ public class CheckpointFailureManager {
             lastSucceededCheckpointId = checkpointId;
             clearCount();
         }
+    }
+
+    /** Handle job fails due to the timeout of continuous checkpoint failures. */
+    public void handleJobFailsDueToCheckpointFailuresTimeout() {
+        clearCount();
+        failureCallback.failJob(
+                new FlinkRuntimeException(TOLERABLE_CHECKPOINT_FAILURES_TIMEOUT_MESSAGE));
     }
 
     private void clearCount() {

@@ -102,6 +102,7 @@ public class JMXJobManagerMetricTest extends TestLogger {
                                     false,
                                     false,
                                     0,
+                                    Long.MAX_VALUE,
                                     0),
                             null);
 
