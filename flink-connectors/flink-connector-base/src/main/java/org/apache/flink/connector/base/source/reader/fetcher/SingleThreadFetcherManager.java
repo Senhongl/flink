@@ -67,19 +67,6 @@ public class SingleThreadFetcherManager<E, SplitT extends SourceSplit>
         }
     }
 
-    @Override
-    public void removeSplits(List<SplitT> splitsToRemove) {
-        SplitFetcher<E, SplitT> fetcher = getRunningFetcher();
-        if (fetcher == null) {
-            fetcher = createSplitFetcher();
-            // Remove the splits from the fetchers.
-            fetcher.removeSplits(splitsToRemove);
-            startFetcher(fetcher);
-        } else {
-            fetcher.removeSplits(splitsToRemove);
-        }
-    }
-
     protected SplitFetcher<E, SplitT> getRunningFetcher() {
         return fetchers.isEmpty() ? null : fetchers.values().iterator().next();
     }
