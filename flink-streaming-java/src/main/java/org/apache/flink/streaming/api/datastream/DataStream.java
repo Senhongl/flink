@@ -347,6 +347,57 @@ public class DataStream<T> {
     }
 
     /**
+     * Reinterprets the given {@link DataStream} as a {@link KeyedStream}, which extracts keys with
+     * the given {@link KeySelector}.
+     *
+     * <p>IMPORTANT: The precondition is that the base stream has either been partitioned by {@link
+     * DataStream#keyBy(KeySelector)} or it is a "Pre-KeyedStream". Besides, the selected key and
+     * partitioning of base stream should have remained unchanged before this transformation.
+     *
+     * <p>"Pre-KeyedStream": The base stream is streaming from the external system, where it has
+     * been grouped by key and partitioned base on {@link
+     * org.apache.flink.api.connector.source.SourceSplit}.
+     *
+     * <p>For a "Pre-KeyedStream", the maximum number of currently existing splits must not be
+     * larger than the maximum number of key-groups. Since every split would be mapped to one
+     * key-group. To config the number of key-group, please config the maximum supported
+     * parallelism.
+     *
+     * <p>IMPORTANT: For a "Pre-KeyedStream", if chaining is disabled for debugging, this method
+     * might not work.
+     *
+     * <p>With the reinterpretation, the upstream operators can now be chained with the downstream
+     * operator and therefore avoiding shuffling data and network consumption between two subtasks.
+     * If shuffling or network consumption is acceptable, {@link DataStream#keyBy(KeySelector)} is
+     * recommended.
+     *
+     * @param keySelector Function that defines how keys are extracted from the data stream.
+     * @param <K> Type of the extracted keys.
+     * @return The reinterpretation of the {@link DataStream} as a {@link KeyedStream}.
+     */
+    public <K> KeyedStream<T, K> reinterpretAsKeyedStream(KeySelector<T, K> keySelector) {
+
+        return reinterpretAsKeyedStream(
+                keySelector, TypeExtractor.getKeySelectorTypes(keySelector, this.getType()));
+    }
+
+    /**
+     * @see #reinterpretAsKeyedStream(KeySelector)
+     * @param keySelector Function that defines how keys are extracted from the data stream.
+     * @param typeInfo Explicit type information about the key type.
+     * @param <K> Type of the extracted keys.
+     * @return The reinterpretation of the {@link DataStream} as a {@link KeyedStream}.
+     */
+    public <K> KeyedStream<T, K> reinterpretAsKeyedStream(
+            KeySelector<T, K> keySelector, TypeInformation<K> typeInfo) {
+
+        PartitionTransformation<T> partitionTransformation =
+                new PartitionTransformation<>(this.getTransformation(), new ForwardPartitioner<>());
+
+        return new KeyedStream<>(this, partitionTransformation, keySelector, typeInfo);
+    }
+
+    /**
      * Partitions a tuple DataStream on the specified key fields using a custom partitioner. This
      * method takes the key position to partition on, and a partitioner that accepts the key type.
      *

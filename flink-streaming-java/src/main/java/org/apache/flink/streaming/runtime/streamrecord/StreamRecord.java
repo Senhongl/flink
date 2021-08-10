@@ -25,7 +25,7 @@ import org.apache.flink.annotation.Internal;
  * @param <T> The type encapsulated with the stream record.
  */
 @Internal
-public final class StreamRecord<T> extends StreamElement {
+public class StreamRecord<T> extends StreamElement {
 
     /** The actual value held by this record. */
     private T value;

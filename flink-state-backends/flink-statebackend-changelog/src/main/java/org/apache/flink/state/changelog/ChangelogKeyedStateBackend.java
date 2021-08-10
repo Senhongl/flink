@@ -228,6 +228,11 @@ public class ChangelogKeyedStateBackend<K>
     }
 
     @Override
+    public void setCurrentKeyAndKeyGroup(K newKey, int keyGroup) {
+        keyedStateBackend.setCurrentKeyAndKeyGroup(newKey, keyGroup);
+    }
+
+    @Override
     public K getCurrentKey() {
         return keyedStateBackend.getCurrentKey();
     }

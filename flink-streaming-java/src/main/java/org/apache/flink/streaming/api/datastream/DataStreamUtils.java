@@ -158,13 +158,8 @@ public final class DataStreamUtils {
     // ------------------------------------------------------------------------
 
     /**
-     * Reinterprets the given {@link DataStream} as a {@link KeyedStream}, which extracts keys with
-     * the given {@link KeySelector}.
-     *
-     * <p>IMPORTANT: For every partition of the base stream, the keys of events in the base stream
-     * must be partitioned exactly in the same way as if it was created through a {@link
-     * DataStream#keyBy(KeySelector)}.
-     *
+     * @see DataStream#reinterpretAsKeyedStream(KeySelector)
+     * @deprecated Please use {@link DataStream#reinterpretAsKeyedStream(KeySelector)}
      * @param stream The data stream to reinterpret. For every partition, this stream must be
      *     partitioned exactly in the same way as if it was created through a {@link
      *     DataStream#keyBy(KeySelector)}.
@@ -173,6 +168,7 @@ public final class DataStreamUtils {
      * @param <K> Type of the extracted keys.
      * @return The reinterpretation of the {@link DataStream} as a {@link KeyedStream}.
      */
+    @Deprecated
     public static <T, K> KeyedStream<T, K> reinterpretAsKeyedStream(
             DataStream<T> stream, KeySelector<T, K> keySelector) {
 
@@ -183,13 +179,9 @@ public final class DataStreamUtils {
     }
 
     /**
-     * Reinterprets the given {@link DataStream} as a {@link KeyedStream}, which extracts keys with
-     * the given {@link KeySelector}.
-     *
-     * <p>IMPORTANT: For every partition of the base stream, the keys of events in the base stream
-     * must be partitioned exactly in the same way as if it was created through a {@link
-     * DataStream#keyBy(KeySelector)}.
-     *
+     * @see DataStream#reinterpretAsKeyedStream(KeySelector)
+     * @deprecated Please use {@link DataStream#reinterpretAsKeyedStream(KeySelector,
+     *     TypeInformation)}
      * @param stream The data stream to reinterpret. For every partition, this stream must be
      *     partitioned exactly in the same way as if it was created through a {@link
      *     DataStream#keyBy(KeySelector)}.
@@ -199,6 +191,7 @@ public final class DataStreamUtils {
      * @param <K> Type of the extracted keys.
      * @return The reinterpretation of the {@link DataStream} as a {@link KeyedStream}.
      */
+    @Deprecated
     public static <T, K> KeyedStream<T, K> reinterpretAsKeyedStream(
             DataStream<T> stream, KeySelector<T, K> keySelector, TypeInformation<K> typeInfo) {
 

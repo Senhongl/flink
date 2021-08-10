@@ -48,6 +48,7 @@ import org.apache.flink.runtime.state.VoidNamespaceSerializer;
 import org.apache.flink.streaming.api.graph.StreamConfig;
 import org.apache.flink.streaming.api.operators.StreamOperatorStateHandler.CheckpointedStreamOperator;
 import org.apache.flink.streaming.api.watermark.Watermark;
+import org.apache.flink.streaming.runtime.streamrecord.KeyedStreamRecord;
 import org.apache.flink.streaming.runtime.streamrecord.LatencyMarker;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.runtime.streamstatus.StreamStatus;
@@ -500,12 +501,20 @@ public abstract class AbstractStreamOperator<OUT>
             throws Exception {
         if (selector != null) {
             Object key = selector.getKey(record.getValue());
-            setCurrentKey(key);
+            if (record instanceof KeyedStreamRecord) {
+                setCurrentKeyAndKeyGroup(key, ((KeyedStreamRecord<T>) record).getKeyGroup());
+            } else {
+                setCurrentKey(key);
+            }
         }
     }
 
     public void setCurrentKey(Object key) {
         stateHandler.setCurrentKey(key);
+    }
+
+    public void setCurrentKeyAndKeyGroup(Object key, int keyGroup) {
+        stateHandler.setCurrentKeyAndKeyGroup(key, keyGroup);
     }
 
     public Object getCurrentKey() {

@@ -116,6 +116,11 @@ public class BatchExecutionKeyedStateBackend<K> implements CheckpointableKeyedSt
     }
 
     @Override
+    public void setCurrentKeyAndKeyGroup(K newKey, int keyGroup) {
+        throw new IllegalStateException("This method should never be called.");
+    }
+
+    @Override
     public K getCurrentKey() {
         return currentKey;
     }

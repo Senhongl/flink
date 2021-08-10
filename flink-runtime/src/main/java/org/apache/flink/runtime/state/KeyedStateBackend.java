@@ -42,6 +42,14 @@ public interface KeyedStateBackend<K>
      */
     void setCurrentKey(K newKey);
 
+    /**
+     * Sets the current key and its corresponding keyGroup that are used for partitioned state.
+     *
+     * @param newKey The new current key.
+     * @param keyGroup The keyGroup of added new key.
+     */
+    void setCurrentKeyAndKeyGroup(K newKey, int keyGroup);
+
     /** @return Current key. */
     K getCurrentKey();
 

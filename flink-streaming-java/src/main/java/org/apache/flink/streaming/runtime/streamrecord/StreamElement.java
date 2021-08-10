@@ -50,7 +50,7 @@ public abstract class StreamElement {
      * @return True, if this element is a record, false otherwise.
      */
     public final boolean isRecord() {
-        return getClass() == StreamRecord.class;
+        return getClass() == StreamRecord.class || getClass() == KeyedStreamRecord.class;
     }
 
     /**
