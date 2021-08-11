@@ -19,7 +19,6 @@
 package org.apache.flink.streaming.api.operators.source;
 
 import org.apache.flink.api.common.eventtime.NoWatermarksGenerator;
-import org.apache.flink.api.common.eventtime.RecordTimestampAssigner;
 import org.apache.flink.api.common.eventtime.TimestampAssigner;
 import org.apache.flink.api.common.eventtime.Watermark;
 import org.apache.flink.api.common.eventtime.WatermarkGenerator;
@@ -41,7 +40,7 @@ public class SourceOutputWithWatermarksTest {
         final CollectingDataOutput<Integer> dataOutput = new CollectingDataOutput<>();
         final SourceOutputWithWatermarks<Integer> out =
                 SourceOutputWithWatermarks.createWithSameOutputs(
-                        dataOutput, new RecordTimestampAssigner<>(), new NoWatermarksGenerator<>());
+                        dataOutput, new NoWatermarksGenerator<>());
 
         out.collect(17);
 
@@ -55,9 +54,7 @@ public class SourceOutputWithWatermarksTest {
         final CollectingDataOutput<Integer> dataOutput = new CollectingDataOutput<>();
         final SourceOutputWithWatermarks<Integer> out =
                 SourceOutputWithWatermarks.createWithSameOutputs(
-                        dataOutput,
-                        new RecordTimestampAssigner<>(),
-                        new TestWatermarkGenerator<>());
+                        dataOutput, new TestWatermarkGenerator<>());
 
         out.collect(42, 12345L);
 

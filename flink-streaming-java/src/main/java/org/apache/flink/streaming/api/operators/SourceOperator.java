@@ -40,9 +40,13 @@ import org.apache.flink.runtime.source.event.NoMoreSplitsEvent;
 import org.apache.flink.runtime.source.event.ReaderRegistrationEvent;
 import org.apache.flink.runtime.source.event.RequestSplitEvent;
 import org.apache.flink.runtime.source.event.SourceEventWrapper;
+import org.apache.flink.runtime.state.KeyGroupRange;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
+import org.apache.flink.streaming.api.operators.source.KeyGroupAssigner;
+import org.apache.flink.streaming.api.operators.source.ReaderOutputAdapter;
 import org.apache.flink.streaming.api.operators.source.TimestampsAndWatermarks;
+import org.apache.flink.streaming.api.operators.source.TimestampsAndWatermarksImpl;
 import org.apache.flink.streaming.api.operators.util.SimpleVersionedListState;
 import org.apache.flink.streaming.runtime.io.DataInputStatus;
 import org.apache.flink.streaming.runtime.io.PushingAsyncDataInput;
@@ -128,6 +132,15 @@ public class SourceOperator<OUT, SplitT extends SourceSplit> extends AbstractStr
      */
     private TimestampsAndWatermarks<OUT> eventTimeLogic;
 
+    /** The KeyGroupRange this subtask takes responsibility of. */
+    private final KeyGroupRange keyGroupRange;
+
+    /** If the input stream is pre-KeyedStream, the source will assign key group for each record. */
+    private final boolean isPreKeyedStream;
+
+    /** An assigner assigns key group for each record. */
+    private KeyGroupAssigner keyGroupAssigner;
+
     public SourceOperator(
             FunctionWithException<SourceReaderContext, SourceReader<OUT, SplitT>, Exception>
                     readerFactory,
@@ -137,7 +150,9 @@ public class SourceOperator<OUT, SplitT extends SourceSplit> extends AbstractStr
             ProcessingTimeService timeService,
             Configuration configuration,
             String localHostname,
-            boolean emitProgressiveWatermarks) {
+            boolean emitProgressiveWatermarks,
+            KeyGroupRange keyGroupRange,
+            boolean isPreKeyedStream) {
 
         this.readerFactory = checkNotNull(readerFactory);
         this.operatorEventGateway = checkNotNull(operatorEventGateway);
@@ -147,6 +162,8 @@ public class SourceOperator<OUT, SplitT extends SourceSplit> extends AbstractStr
         this.configuration = checkNotNull(configuration);
         this.localHostname = checkNotNull(localHostname);
         this.emitProgressiveWatermarks = emitProgressiveWatermarks;
+        this.isPreKeyedStream = isPreKeyedStream;
+        this.keyGroupRange = keyGroupRange;
     }
 
     /**
@@ -232,17 +249,19 @@ public class SourceOperator<OUT, SplitT extends SourceSplit> extends AbstractStr
 
         // in the future when we this one is migrated to the "eager initialization" operator
         // (StreamOperatorV2), then we should evaluate this during operator construction.
+        if (isPreKeyedStream) {
+            keyGroupAssigner =
+                    new KeyGroupAssigner(
+                            keyGroupRange.getStartKeyGroup(), keyGroupRange.getEndKeyGroup());
+        }
+
         if (emitProgressiveWatermarks) {
             eventTimeLogic =
-                    TimestampsAndWatermarks.createProgressiveEventTimeLogic(
+                    new TimestampsAndWatermarksImpl<>(
                             watermarkStrategy,
                             getMetricGroup(),
                             getProcessingTimeService(),
                             getExecutionConfig().getAutoWatermarkInterval());
-        } else {
-            eventTimeLogic =
-                    TimestampsAndWatermarks.createNoOpEventTimeLogic(
-                            watermarkStrategy, getMetricGroup());
         }
 
         // restore the state if necessary.
@@ -257,7 +276,9 @@ public class SourceOperator<OUT, SplitT extends SourceSplit> extends AbstractStr
         // Start the reader after registration, sending messages in start is allowed.
         sourceReader.start();
 
-        eventTimeLogic.startPeriodicWatermarkEmits();
+        if (eventTimeLogic != null) {
+            eventTimeLogic.startPeriodicWatermarkEmits();
+        }
     }
 
     @Override
@@ -288,7 +309,17 @@ public class SourceOperator<OUT, SplitT extends SourceSplit> extends AbstractStr
         }
 
         // this creates a batch or streaming output based on the runtime mode
-        currentMainOutput = eventTimeLogic.createMainOutput(output);
+        ReaderOutput<OUT> sourceOutputWithWatermarks = null;
+        if (eventTimeLogic != null) {
+            sourceOutputWithWatermarks = eventTimeLogic.createMainOutput(output);
+        }
+        currentMainOutput =
+                new ReaderOutputAdapter<>(
+                        watermarkStrategy,
+                        getMetricGroup(),
+                        output,
+                        keyGroupAssigner,
+                        sourceOutputWithWatermarks);
         lastInvokedOutput = output;
         return convertToInternalStatus(sourceReader.pollNext(currentMainOutput));
     }

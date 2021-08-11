@@ -142,6 +142,7 @@ under the License.
 				<artifactId>maven-surefire-plugin</artifactId>
 				<configuration>
 					<reuseForks>false</reuseForks>
+					<argLine>-XX:+PrintCompilation -XX:+UnlockDiagnosticVMOptions -XX:+PrintInlining</argLine>
 				</configuration>
 			</plugin>
 
