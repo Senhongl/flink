@@ -373,6 +373,7 @@ public class StreamOperatorStateHandler {
                 @SuppressWarnings("rawtypes")
                 CheckpointableKeyedStateBackend rawBackend = keyedStateBackend;
 
+                rawBackend.setCurrentKey(key);
                 rawBackend.setCurrentKeyAndKeyGroup(key, keyGroup);
             } catch (Exception e) {
                 throw new RuntimeException(

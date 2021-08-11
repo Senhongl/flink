@@ -27,6 +27,7 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.runtime.metrics.groups.UnregisteredMetricGroups;
 import org.apache.flink.runtime.operators.coordination.MockOperatorEventGateway;
 import org.apache.flink.runtime.operators.coordination.OperatorEventGateway;
+import org.apache.flink.runtime.state.KeyGroupRangeAssignment;
 import org.apache.flink.streaming.api.operators.SourceOperator;
 import org.apache.flink.streaming.api.operators.StreamingRuntimeContext;
 import org.apache.flink.streaming.runtime.tasks.ProcessingTimeService;
@@ -90,7 +91,10 @@ public class TestingSourceOperator<T> extends SourceOperator<T, MockSourceSplit>
                 timeService,
                 new Configuration(),
                 "localhost",
-                emitProgressiveWatermarks);
+                emitProgressiveWatermarks,
+                KeyGroupRangeAssignment.computeKeyGroupRangeForOperatorIndex(
+                        128, parallelism, subtaskIndex),
+                false);
 
         this.subtaskIndex = subtaskIndex;
         this.parallelism = parallelism;

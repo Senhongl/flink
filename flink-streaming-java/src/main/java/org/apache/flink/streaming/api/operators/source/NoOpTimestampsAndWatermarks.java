@@ -49,7 +49,7 @@ public class NoOpTimestampsAndWatermarks<T> implements TimestampsAndWatermarks<T
     @Override
     public ReaderOutput<T> createMainOutput(PushingAsyncDataInput.DataOutput<T> output) {
         checkNotNull(output);
-        return new TimestampsOnlyOutput<>(output, timestamps);
+        return new TimestampsOnlyOutput<T>(output, timestamps);
     }
 
     @Override

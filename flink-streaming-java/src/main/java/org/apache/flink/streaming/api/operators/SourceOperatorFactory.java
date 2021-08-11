@@ -18,7 +18,9 @@ limitations under the License.
 
 package org.apache.flink.streaming.api.operators;
 
+import org.apache.flink.api.common.TaskInfo;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.common.typeutils.base.StringSerializer;
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.api.connector.source.SourceReader;
@@ -30,9 +32,14 @@ import org.apache.flink.runtime.jobgraph.OperatorID;
 import org.apache.flink.runtime.operators.coordination.OperatorCoordinator;
 import org.apache.flink.runtime.operators.coordination.OperatorEventGateway;
 import org.apache.flink.runtime.source.coordinator.SourceCoordinatorProvider;
+import org.apache.flink.runtime.state.KeyGroupRange;
+import org.apache.flink.runtime.state.KeyGroupRangeAssignment;
+import org.apache.flink.streaming.api.graph.StreamConfig;
 import org.apache.flink.streaming.runtime.tasks.ProcessingTimeService;
 import org.apache.flink.streaming.runtime.tasks.ProcessingTimeServiceAware;
 import org.apache.flink.util.function.FunctionWithException;
+
+import java.util.Map;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
@@ -87,6 +94,25 @@ public class SourceOperatorFactory<OUT> extends AbstractStreamOperatorFactory<OU
         final OperatorID operatorId = parameters.getStreamConfig().getOperatorID();
         final OperatorEventGateway gateway =
                 parameters.getOperatorEventDispatcher().getOperatorEventGateway(operatorId);
+        final TaskInfo taskInfo = parameters.getContainingTask().getEnvironment().getTaskInfo();
+        final KeyGroupRange keyGroupRange =
+                KeyGroupRangeAssignment.computeKeyGroupRangeForOperatorIndex(
+                        taskInfo.getMaxNumberOfParallelSubtasks(),
+                        taskInfo.getNumberOfParallelSubtasks(),
+                        taskInfo.getIndexOfThisSubtask());
+
+        final ClassLoader userCodeClassloader =
+                parameters.getContainingTask().getUserCodeClassLoader();
+        final StreamConfig configuration = parameters.getContainingTask().getConfiguration();
+        boolean isPreKeyedStream = false;
+        final Map<Integer, StreamConfig> chainedConfigs =
+                configuration.getTransitiveChainedTaskConfigs(userCodeClassloader);
+        for (StreamConfig config : chainedConfigs.values()) {
+            if (config.getStateKeySerializer(userCodeClassloader) != null) {
+                isPreKeyedStream = true;
+                break;
+            }
+        }
 
         final SourceOperator<OUT, ?> sourceOperator =
                 instantiateSourceOperator(
@@ -105,7 +131,13 @@ public class SourceOperatorFactory<OUT> extends AbstractStreamOperatorFactory<OU
                                 .getEnvironment()
                                 .getTaskManagerInfo()
                                 .getTaskManagerExternalAddress(),
-                        emitProgressiveWatermarks);
+                        emitProgressiveWatermarks,
+                        keyGroupRange,
+                        isPreKeyedStream);
+
+        if (isPreKeyedStream) {
+            parameters.getStreamConfig().setStateKeySerializer(new StringSerializer());
+        }
 
         sourceOperator.setup(
                 parameters.getContainingTask(),
@@ -155,7 +187,9 @@ public class SourceOperatorFactory<OUT> extends AbstractStreamOperatorFactory<OU
                     ProcessingTimeService timeService,
                     Configuration config,
                     String localHostName,
-                    boolean emitProgressiveWatermarks) {
+                    boolean emitProgressiveWatermarks,
+                    KeyGroupRange keyGroupRange,
+                    boolean isPreKeyedStream) {
 
         // jumping through generics hoops: cast the generics away to then cast them back more
         // strictly typed
@@ -176,6 +210,8 @@ public class SourceOperatorFactory<OUT> extends AbstractStreamOperatorFactory<OU
                 timeService,
                 config,
                 localHostName,
-                emitProgressiveWatermarks);
+                emitProgressiveWatermarks,
+                keyGroupRange,
+                isPreKeyedStream);
     }
 }

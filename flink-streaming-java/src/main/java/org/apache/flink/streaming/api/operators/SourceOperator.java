@@ -22,6 +22,8 @@ import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
+import org.apache.flink.api.common.state.ValueState;
+import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.api.common.typeutils.base.array.BytePrimitiveArraySerializer;
 import org.apache.flink.api.connector.source.ReaderOutput;
 import org.apache.flink.api.connector.source.SourceEvent;
@@ -40,11 +42,16 @@ import org.apache.flink.runtime.source.event.NoMoreSplitsEvent;
 import org.apache.flink.runtime.source.event.ReaderRegistrationEvent;
 import org.apache.flink.runtime.source.event.RequestSplitEvent;
 import org.apache.flink.runtime.source.event.SourceEventWrapper;
+import org.apache.flink.runtime.state.KeyGroupRange;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
+import org.apache.flink.streaming.api.operators.source.KeyGroupAssigner;
+import org.apache.flink.streaming.api.operators.source.ReaderOutputAdaptor;
+import org.apache.flink.streaming.api.operators.source.SourceOutputWithWatermarks;
+import org.apache.flink.streaming.api.operators.source.TimestampsAndWatermarskImpl;
 import org.apache.flink.streaming.api.operators.source.TimestampsAndWatermarks;
 import org.apache.flink.streaming.api.operators.util.SimpleVersionedListState;
-import org.apache.flink.streaming.runtime.io.DataInputStatus;
+import org.apache.flink.streaming.api.operators.util.SimpleVersionedValueState;
 import org.apache.flink.streaming.runtime.io.PushingAsyncDataInput;
 import org.apache.flink.streaming.runtime.tasks.ProcessingTimeService;
 import org.apache.flink.util.CollectionUtil;
@@ -53,7 +60,10 @@ import org.apache.flink.util.UserCodeClassLoader;
 import org.apache.flink.util.function.FunctionWithException;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
@@ -121,12 +131,26 @@ public class SourceOperator<OUT, SplitT extends SourceSplit> extends AbstractStr
     /** The state that holds the currently assigned splits. */
     private ListState<SplitT> readerState;
 
+    private final KeyGroupRange keyGroupRange;
+
+    private final boolean isPreKeyedStream;
+
+    private KeyGroupAssigner keyGroupAssigner;
+
+    private transient ValueState<SplitT> tmpState;
+
+    private final String ASSIGNER_STATE_NAME = "keyGroupAssignerState";
+
+    private final Map<String, Integer> splitToKeyGroup;
     /**
      * The event time and watermarking logic. Ideally this would be eagerly passed into this
      * operator, but we currently need to instantiate this lazily, because the metric groups exist
      * only later.
      */
     private TimestampsAndWatermarks<OUT> eventTimeLogic;
+
+    /** Indicating whether the source operator has been closed. */
+    private boolean closed;
 
     public SourceOperator(
             FunctionWithException<SourceReaderContext, SourceReader<OUT, SplitT>, Exception>
@@ -137,7 +161,9 @@ public class SourceOperator<OUT, SplitT extends SourceSplit> extends AbstractStr
             ProcessingTimeService timeService,
             Configuration configuration,
             String localHostname,
-            boolean emitProgressiveWatermarks) {
+            boolean emitProgressiveWatermarks,
+            KeyGroupRange keyGroupRange,
+            boolean isPreKeyedStream) {
 
         this.readerFactory = checkNotNull(readerFactory);
         this.operatorEventGateway = checkNotNull(operatorEventGateway);
@@ -147,6 +173,9 @@ public class SourceOperator<OUT, SplitT extends SourceSplit> extends AbstractStr
         this.configuration = checkNotNull(configuration);
         this.localHostname = checkNotNull(localHostname);
         this.emitProgressiveWatermarks = emitProgressiveWatermarks;
+        this.keyGroupRange = keyGroupRange;
+        this.splitToKeyGroup = new HashMap<>();
+        this.isPreKeyedStream = isPreKeyedStream;
     }
 
     /**
@@ -232,21 +261,57 @@ public class SourceOperator<OUT, SplitT extends SourceSplit> extends AbstractStr
 
         // in the future when we this one is migrated to the "eager initialization" operator
         // (StreamOperatorV2), then we should evaluate this during operator construction.
+        //        if (emitProgressiveWatermarks) {
+        //            eventTimeLogic =
+        //                    TimestampsAndWatermarks.createProgressiveEventTimeLogic(
+        //                            watermarkStrategy,
+        //                            getMetricGroup(),
+        //                            getProcessingTimeService(),
+        //                            getExecutionConfig().getAutoWatermarkInterval());
+        //        } else {
+        //            eventTimeLogic =
+        //                    TimestampsAndWatermarks.createNoOpEventTimeLogic(
+        //                            watermarkStrategy, getMetricGroup());
+        //        }
+        if (isPreKeyedStream) {
+            keyGroupAssigner =
+                    new KeyGroupAssigner(
+                            keyGroupRange.getStartKeyGroup(), keyGroupRange.getEndKeyGroup());
+            for (int i = keyGroupRange.getStartKeyGroup();
+                    i <= keyGroupRange.getEndKeyGroup();
+                    i++) {
+                super.setCurrentKeyAndKeyGroup("SplitId", i);
+                if (tmpState.value() != null) {
+                    splitToKeyGroup.put(tmpState.value().splitId(), i);
+                }
+            }
+            keyGroupAssigner.initializeState(splitToKeyGroup);
+        }
+
         if (emitProgressiveWatermarks) {
             eventTimeLogic =
-                    TimestampsAndWatermarks.createProgressiveEventTimeLogic(
+                    new TimestampsAndWatermarskImpl<>(
                             watermarkStrategy,
                             getMetricGroup(),
                             getProcessingTimeService(),
                             getExecutionConfig().getAutoWatermarkInterval());
-        } else {
-            eventTimeLogic =
-                    TimestampsAndWatermarks.createNoOpEventTimeLogic(
-                            watermarkStrategy, getMetricGroup());
         }
 
+
         // restore the state if necessary.
-        final List<SplitT> splits = CollectionUtil.iterableToList(readerState.get());
+        List<SplitT> splits = new ArrayList<>();
+        if (isPreKeyedStream) {
+            for (int i = keyGroupRange.getStartKeyGroup();
+                    i <= keyGroupRange.getEndKeyGroup();
+                    i++) {
+                super.setCurrentKeyAndKeyGroup("SplitId", i);
+                if (tmpState.value() != null) {
+                    splits.add(tmpState.value());
+                }
+            }
+        } else {
+            splits = CollectionUtil.iterableToList(readerState.get());
+        }
         if (!splits.isEmpty()) {
             sourceReader.addSplits(splits);
         }
@@ -257,60 +322,78 @@ public class SourceOperator<OUT, SplitT extends SourceSplit> extends AbstractStr
         // Start the reader after registration, sending messages in start is allowed.
         sourceReader.start();
 
-        eventTimeLogic.startPeriodicWatermarkEmits();
-    }
-
-    @Override
-    public void finish() throws Exception {
         if (eventTimeLogic != null) {
-            eventTimeLogic.stopPeriodicWatermarkEmits();
+            eventTimeLogic.startPeriodicWatermarkEmits();
         }
-        super.finish();
     }
 
     @Override
     public void close() throws Exception {
+        if (eventTimeLogic != null) {
+            eventTimeLogic.stopPeriodicWatermarkEmits();
+        }
         if (sourceReader != null) {
             sourceReader.close();
         }
+        closed = true;
         super.close();
     }
 
     @Override
-    public DataInputStatus emitNext(DataOutput<OUT> output) throws Exception {
+    public void dispose() throws Exception {
+        // We also need to close the source reader to make sure the resources
+        // are released if the task does not finish normally.
+        if (!closed && sourceReader != null) {
+            sourceReader.close();
+        }
+    }
+
+    @Override
+    public InputStatus emitNext(DataOutput<OUT> output) throws Exception {
         // guarding an assumptions we currently make due to the fact that certain classes
         // assume a constant output
         assert lastInvokedOutput == output || lastInvokedOutput == null;
 
         // short circuit the common case (every invocation except the first)
         if (currentMainOutput != null) {
-            return convertToInternalStatus(sourceReader.pollNext(currentMainOutput));
+            return sourceReader.pollNext(currentMainOutput);
         }
 
         // this creates a batch or streaming output based on the runtime mode
-        currentMainOutput = eventTimeLogic.createMainOutput(output);
-        lastInvokedOutput = output;
-        return convertToInternalStatus(sourceReader.pollNext(currentMainOutput));
-    }
-
-    private DataInputStatus convertToInternalStatus(InputStatus inputStatus) {
-        switch (inputStatus) {
-            case MORE_AVAILABLE:
-                return DataInputStatus.MORE_AVAILABLE;
-            case NOTHING_AVAILABLE:
-                return DataInputStatus.NOTHING_AVAILABLE;
-            case END_OF_INPUT:
-                return DataInputStatus.END_OF_INPUT;
-            default:
-                throw new IllegalArgumentException("Unknown input status: " + inputStatus);
+        ReaderOutput<OUT> sourceOutputWithWatermarks = null;
+        if (eventTimeLogic != null) {
+            sourceOutputWithWatermarks = eventTimeLogic.createMainOutput(output);
         }
+        currentMainOutput = new ReaderOutputAdaptor<>(watermarkStrategy, getMetricGroup(), output, keyGroupAssigner, sourceOutputWithWatermarks);
+        lastInvokedOutput = output;
+        return sourceReader.pollNext(currentMainOutput);
     }
 
     @Override
     public void snapshotState(StateSnapshotContext context) throws Exception {
         long checkpointId = context.getCheckpointId();
         LOG.debug("Taking a snapshot for checkpoint {}", checkpointId);
-        readerState.update(sourceReader.snapshotState(checkpointId));
+        List<SplitT> readerState = sourceReader.snapshotState(checkpointId);
+        if (isPreKeyedStream) {
+            Map<String, Integer> state = keyGroupAssigner.getSplitToKeyGroup();
+            Map<Integer, String> keyGroupToSplitId = new HashMap<>();
+            Map<String, SplitT> splitIdToSplit = new HashMap<>();
+            state.forEach((key, value) -> keyGroupToSplitId.put(value, key));
+            for (SplitT split : readerState) {
+                splitIdToSplit.put(split.splitId(), split);
+            }
+            for (int i = keyGroupRange.getStartKeyGroup();
+                    i <= keyGroupRange.getEndKeyGroup();
+                    i++) {
+                super.setCurrentKeyAndKeyGroup("SplitId", i);
+                tmpState.clear();
+                if (keyGroupToSplitId.containsKey(i)) {
+                    tmpState.update(splitIdToSplit.get(keyGroupToSplitId.get(i)));
+                }
+            }
+        } else {
+            this.readerState.update(readerState);
+        }
     }
 
     @Override
@@ -321,9 +404,17 @@ public class SourceOperator<OUT, SplitT extends SourceSplit> extends AbstractStr
     @Override
     public void initializeState(StateInitializationContext context) throws Exception {
         super.initializeState(context);
-        final ListState<byte[]> rawState =
-                context.getOperatorStateStore().getListState(SPLITS_STATE_DESC);
-        readerState = new SimpleVersionedListState<>(rawState, splitSerializer);
+        if (isPreKeyedStream) {
+            ValueStateDescriptor<byte[]> stateId =
+                    new ValueStateDescriptor<>(
+                            ASSIGNER_STATE_NAME, BytePrimitiveArraySerializer.INSTANCE);
+            final ValueState<byte[]> rawReaderState = getPartitionedState(stateId);
+            tmpState = new SimpleVersionedValueState<>(rawReaderState, splitSerializer);
+        } else {
+            final ListState<byte[]> rawReaderState =
+                    context.getOperatorStateStore().getListState(SPLITS_STATE_DESC);
+            readerState = new SimpleVersionedListState<>(rawReaderState, splitSerializer);
+        }
     }
 
     @Override

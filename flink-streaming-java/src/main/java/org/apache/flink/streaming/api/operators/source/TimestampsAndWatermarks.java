@@ -60,36 +60,4 @@ public interface TimestampsAndWatermarks<T> {
 
     /** Stops emitting periodic watermarks. */
     void stopPeriodicWatermarkEmits();
-
-    // ------------------------------------------------------------------------
-    //  factories
-    // ------------------------------------------------------------------------
-
-    static <E> TimestampsAndWatermarks<E> createProgressiveEventTimeLogic(
-            WatermarkStrategy<E> watermarkStrategy,
-            MetricGroup metrics,
-            ProcessingTimeService timeService,
-            long periodicWatermarkIntervalMillis) {
-
-        final TimestampsAndWatermarksContext context = new TimestampsAndWatermarksContext(metrics);
-        final TimestampAssigner<E> timestampAssigner =
-                watermarkStrategy.createTimestampAssigner(context);
-
-        return new ProgressiveTimestampsAndWatermarks<>(
-                timestampAssigner,
-                watermarkStrategy,
-                context,
-                timeService,
-                Duration.ofMillis(periodicWatermarkIntervalMillis));
-    }
-
-    static <E> TimestampsAndWatermarks<E> createNoOpEventTimeLogic(
-            WatermarkStrategy<E> watermarkStrategy, MetricGroup metrics) {
-
-        final TimestampsAndWatermarksContext context = new TimestampsAndWatermarksContext(metrics);
-        final TimestampAssigner<E> timestampAssigner =
-                watermarkStrategy.createTimestampAssigner(context);
-
-        return new NoOpTimestampsAndWatermarks<>(timestampAssigner);
-    }
 }

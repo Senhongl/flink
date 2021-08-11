@@ -87,6 +87,9 @@ public class SourceTransformationTranslator<OUT, SplitT extends SourceSplit, Enu
                 transformation.getOutputType(),
                 "Source: " + transformation.getName());
 
+        //        streamGraph.getStreamNode(transformationId).setStateKeySerializer(new
+        // StringSerializer());
+
         final int parallelism =
                 transformation.getParallelism() != ExecutionConfig.PARALLELISM_DEFAULT
                         ? transformation.getParallelism()

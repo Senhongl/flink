@@ -25,8 +25,12 @@ import org.apache.flink.api.common.eventtime.WatermarkGenerator;
 import org.apache.flink.api.common.eventtime.WatermarkOutput;
 import org.apache.flink.api.connector.source.SourceOutput;
 import org.apache.flink.streaming.runtime.io.PushingAsyncDataInput;
+import org.apache.flink.streaming.runtime.streamrecord.KeyedStreamRecord;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.runtime.tasks.ExceptionInChainedOperatorException;
+import org.apache.flink.util.Preconditions;
+
+import javax.annotation.Nullable;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
@@ -58,35 +62,23 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
 @Internal
 public class SourceOutputWithWatermarks<T> implements SourceOutput<T> {
 
-    private final PushingAsyncDataInput.DataOutput<T> recordsOutput;
-
-    private final TimestampAssigner<T> timestampAssigner;
-
     private final WatermarkGenerator<T> watermarkGenerator;
 
     private final WatermarkOutput onEventWatermarkOutput;
 
     private final WatermarkOutput periodicWatermarkOutput;
 
-    private final StreamRecord<T> reusingRecord;
-
     /**
      * Creates a new SourceOutputWithWatermarks that emits records to the given DataOutput and
      * watermarks to the (possibly different) WatermarkOutput.
      */
-    protected SourceOutputWithWatermarks(
-            PushingAsyncDataInput.DataOutput<T> recordsOutput,
+    public SourceOutputWithWatermarks(
+            WatermarkGenerator<T> watermarkGenerator,
             WatermarkOutput onEventWatermarkOutput,
-            WatermarkOutput periodicWatermarkOutput,
-            TimestampAssigner<T> timestampAssigner,
-            WatermarkGenerator<T> watermarkGenerator) {
-
-        this.recordsOutput = checkNotNull(recordsOutput);
-        this.onEventWatermarkOutput = checkNotNull(onEventWatermarkOutput);
-        this.periodicWatermarkOutput = checkNotNull(periodicWatermarkOutput);
-        this.timestampAssigner = checkNotNull(timestampAssigner);
-        this.watermarkGenerator = checkNotNull(watermarkGenerator);
-        this.reusingRecord = new StreamRecord<>(null);
+            WatermarkOutput periodicWatermarkOutput) {
+        this.watermarkGenerator = Preconditions.checkNotNull(watermarkGenerator);
+        this.onEventWatermarkOutput = Preconditions.checkNotNull(onEventWatermarkOutput);
+        this.periodicWatermarkOutput = Preconditions.checkNotNull(periodicWatermarkOutput);
     }
 
     // ------------------------------------------------------------------------
@@ -97,23 +89,14 @@ public class SourceOutputWithWatermarks<T> implements SourceOutput<T> {
     // ------------------------------------------------------------------------
 
     @Override
-    public final void collect(T record) {
-        collect(record, TimestampAssigner.NO_TIMESTAMP);
+    public void collect(T record) {
+        throw new IllegalStateException(
+                "This method should never be called. Since this wrapped method is called outside.");
     }
 
     @Override
-    public final void collect(T record, long timestamp) {
-        try {
-            final long assignedTimestamp = timestampAssigner.extractTimestamp(record, timestamp);
-
-            // IMPORTANT: The event must be emitted before the watermark generator is called.
-            recordsOutput.emitRecord(reusingRecord.replace(record, assignedTimestamp));
-            watermarkGenerator.onEvent(record, assignedTimestamp, onEventWatermarkOutput);
-        } catch (ExceptionInChainedOperatorException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new ExceptionInChainedOperatorException(e);
-        }
+    public void collect(T record, long timestamp) {
+        watermarkGenerator.onEvent(record, timestamp, onEventWatermarkOutput);
     }
 
     // ------------------------------------------------------------------------
@@ -149,18 +132,15 @@ public class SourceOutputWithWatermarks<T> implements SourceOutput<T> {
      */
     public static <E> SourceOutputWithWatermarks<E> createWithSameOutputs(
             PushingAsyncDataInput.DataOutput<E> recordsAndWatermarksOutput,
-            TimestampAssigner<E> timestampAssigner,
             WatermarkGenerator<E> watermarkGenerator) {
 
         final WatermarkOutput watermarkOutput =
                 new WatermarkToDataOutput(recordsAndWatermarksOutput);
 
         return new SourceOutputWithWatermarks<>(
-                recordsAndWatermarksOutput,
+                watermarkGenerator,
                 watermarkOutput,
-                watermarkOutput,
-                timestampAssigner,
-                watermarkGenerator);
+                watermarkOutput);
     }
 
     /**
@@ -168,17 +148,13 @@ public class SourceOutputWithWatermarks<T> implements SourceOutput<T> {
      * watermarks to the different WatermarkOutputs.
      */
     public static <E> SourceOutputWithWatermarks<E> createWithSeparateOutputs(
-            PushingAsyncDataInput.DataOutput<E> recordsOutput,
             WatermarkOutput onEventWatermarkOutput,
             WatermarkOutput periodicWatermarkOutput,
-            TimestampAssigner<E> timestampAssigner,
             WatermarkGenerator<E> watermarkGenerator) {
 
         return new SourceOutputWithWatermarks<>(
-                recordsOutput,
+                watermarkGenerator,
                 onEventWatermarkOutput,
-                periodicWatermarkOutput,
-                timestampAssigner,
-                watermarkGenerator);
+                periodicWatermarkOutput);
     }
 }

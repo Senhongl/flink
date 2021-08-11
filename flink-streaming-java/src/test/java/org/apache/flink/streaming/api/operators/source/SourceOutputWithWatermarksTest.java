@@ -41,7 +41,8 @@ public class SourceOutputWithWatermarksTest {
         final CollectingDataOutput<Integer> dataOutput = new CollectingDataOutput<>();
         final SourceOutputWithWatermarks<Integer> out =
                 SourceOutputWithWatermarks.createWithSameOutputs(
-                        dataOutput, new RecordTimestampAssigner<>(), new NoWatermarksGenerator<>());
+                        dataOutput,
+                        new NoWatermarksGenerator<>());
 
         out.collect(17);
 
@@ -56,7 +57,6 @@ public class SourceOutputWithWatermarksTest {
         final SourceOutputWithWatermarks<Integer> out =
                 SourceOutputWithWatermarks.createWithSameOutputs(
                         dataOutput,
-                        new RecordTimestampAssigner<>(),
                         new TestWatermarkGenerator<>());
 
         out.collect(42, 12345L);

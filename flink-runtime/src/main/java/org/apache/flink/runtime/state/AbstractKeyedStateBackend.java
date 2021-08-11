@@ -191,7 +191,6 @@ public abstract class AbstractKeyedStateBackend<K>
                 KeyGroupRangeAssignment.assignToKeyGroup(newKey, numberOfKeyGroups));
     }
 
-    /** @see KeyedStateBackend */
     @Override
     public void setCurrentKeyAndKeyGroup(K newKey, int keyGroup) {
         notifyKeySelected(newKey);

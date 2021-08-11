@@ -1,37 +1,19 @@
-/*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 package org.apache.flink.streaming.api.operators.source;
 
-import org.apache.flink.annotation.Internal;
 import org.apache.flink.api.common.eventtime.TimestampAssigner;
 import org.apache.flink.api.common.eventtime.WatermarkGenerator;
 import org.apache.flink.api.common.eventtime.WatermarkGeneratorSupplier;
 import org.apache.flink.api.common.eventtime.WatermarkOutput;
 import org.apache.flink.api.common.eventtime.WatermarkOutputMultiplexer;
+import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.connector.source.ReaderOutput;
 import org.apache.flink.api.connector.source.SourceOutput;
+import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.streaming.runtime.io.PushingAsyncDataInput;
 import org.apache.flink.streaming.runtime.tasks.ProcessingTimeService;
 
 import javax.annotation.Nullable;
 
-import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.ScheduledFuture;
@@ -39,16 +21,11 @@ import java.util.concurrent.ScheduledFuture;
 import static org.apache.flink.util.Preconditions.checkState;
 
 /**
- * An implementation of {@link TimestampsAndWatermarks} that does periodic watermark emission and
- * keeps track of watermarks on a per-split basis. This should be used in execution contexts where
- * watermarks are important for efficiency/correctness, for example in STREAMING execution mode.
- *
- * @param <T> The type of the emitted records.
+ * Implementation of {@link TimestampsAndWatermarks}, this class would not take responsibility of
+ * extracting timestamp from records but only generating and propagating watermarks. The
+ * {@link ReaderOutputAdaptor} would help extracting timestamp from the records.
  */
-@Internal
-public class ProgressiveTimestampsAndWatermarks<T> implements TimestampsAndWatermarks<T> {
-
-    private final TimestampAssigner<T> timestampAssigner;
+public class TimestampsAndWatermarskImpl<T> implements TimestampsAndWatermarks<T> {
 
     private final WatermarkGeneratorSupplier<T> watermarksFactory;
 
@@ -58,40 +35,31 @@ public class ProgressiveTimestampsAndWatermarks<T> implements TimestampsAndWater
 
     private final long periodicWatermarkInterval;
 
-    @Nullable private SplitLocalOutputs<T> currentPerSplitOutputs;
+    private SplitLocalOutputs<T> currentPerSplitOutputs;
 
-    @Nullable private StreamingReaderOutput<T> currentMainOutput;
+    private StreamingReaderOutput<T> currentMainOutput;
 
-    @Nullable private ScheduledFuture<?> periodicEmitHandle;
+    private ScheduledFuture<?> periodicEmitHandle;
 
-    public ProgressiveTimestampsAndWatermarks(
-            TimestampAssigner<T> timestampAssigner,
-            WatermarkGeneratorSupplier<T> watermarksFactory,
-            WatermarkGeneratorSupplier.Context watermarksContext,
+    public TimestampsAndWatermarskImpl(
+            WatermarkStrategy<T> watermarkStrategy,
+            MetricGroup metrics,
             ProcessingTimeService timeService,
-            Duration periodicWatermarkInterval) {
+            long periodicWatermarkInterval) {
 
-        this.timestampAssigner = timestampAssigner;
-        this.watermarksFactory = watermarksFactory;
-        this.watermarksContext = watermarksContext;
+        final TimestampsAndWatermarksContext context = new TimestampsAndWatermarksContext(metrics);
+
+        this.watermarksFactory = watermarkStrategy;
+        this.watermarksContext = context;
         this.timeService = timeService;
-
-        long periodicWatermarkIntervalMillis;
-        try {
-            periodicWatermarkIntervalMillis = periodicWatermarkInterval.toMillis();
-        } catch (ArithmeticException ignored) {
-            // long integer overflow
-            periodicWatermarkIntervalMillis = Long.MAX_VALUE;
-        }
-        this.periodicWatermarkInterval = periodicWatermarkIntervalMillis;
+        this.periodicWatermarkInterval = periodicWatermarkInterval;
     }
-
-    // ------------------------------------------------------------------------
 
     @Override
     public ReaderOutput<T> createMainOutput(PushingAsyncDataInput.DataOutput<T> output) {
         // At the moment, we assume only one output is ever created!
-        // This assumption is strict, currently, because many of the classes in this implementation
+        // This assumption is strict, currently, because many of the classes in this
+        // implementation
         // do not
         // support re-assigning the underlying output
         checkState(
@@ -104,19 +72,16 @@ public class ProgressiveTimestampsAndWatermarks<T> implements TimestampsAndWater
 
         currentPerSplitOutputs =
                 new SplitLocalOutputs<>(
-                        output,
                         watermarkOutput,
-                        timestampAssigner,
                         watermarksFactory,
                         watermarksContext);
 
         currentMainOutput =
                 new StreamingReaderOutput<>(
-                        output,
                         watermarkOutput,
-                        timestampAssigner,
                         watermarkGenerator,
                         currentPerSplitOutputs);
+
 
         return currentMainOutput;
     }
@@ -162,9 +127,7 @@ public class ProgressiveTimestampsAndWatermarks<T> implements TimestampsAndWater
         private final SplitLocalOutputs<T> splitLocalOutputs;
 
         StreamingReaderOutput(
-                PushingAsyncDataInput.DataOutput<T> output,
                 WatermarkOutput watermarkOutput,
-                TimestampAssigner<T> timestampAssigner,
                 WatermarkGenerator<T> watermarkGenerator,
                 SplitLocalOutputs<T> splitLocalOutputs) {
 
@@ -172,7 +135,7 @@ public class ProgressiveTimestampsAndWatermarks<T> implements TimestampsAndWater
                     watermarkGenerator,
                     watermarkOutput,
                     watermarkOutput);
-            this.splitLocalOutputs = splitLocalOutputs;
+            this.splitLocalOutputs = splitLocalOutputs;;
         }
 
         @Override
@@ -198,20 +161,14 @@ public class ProgressiveTimestampsAndWatermarks<T> implements TimestampsAndWater
 
         private final WatermarkOutputMultiplexer watermarkMultiplexer;
         private final Map<String, SourceOutputWithWatermarks<T>> localOutputs;
-        private final PushingAsyncDataInput.DataOutput<T> recordOutput;
-        private final TimestampAssigner<T> timestampAssigner;
         private final WatermarkGeneratorSupplier<T> watermarksFactory;
         private final WatermarkGeneratorSupplier.Context watermarkContext;
 
         private SplitLocalOutputs(
-                PushingAsyncDataInput.DataOutput<T> recordOutput,
                 WatermarkOutput watermarkOutput,
-                TimestampAssigner<T> timestampAssigner,
                 WatermarkGeneratorSupplier<T> watermarksFactory,
                 WatermarkGeneratorSupplier.Context watermarkContext) {
 
-            this.recordOutput = recordOutput;
-            this.timestampAssigner = timestampAssigner;
             this.watermarksFactory = watermarksFactory;
             this.watermarkContext = watermarkContext;
 
